@@ -1,6 +1,6 @@
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, dirname, basename } from "node:path";
 import { AppError } from "./errors.js";
 import { runOp, callOp } from "./op.js";
 import { atomicWrite, readPrivate } from "./files.js";
@@ -208,8 +208,40 @@ const profilePath = (name, configDir) =>
 // Windows profiles contain references only; OS directory permissions protect metadata.
 const profileFileOptions = () =>
   process.platform === "win32" ? { private: false } : {};
-export async function saveProfile(profile, { configDir } = {}) {
+// Resolve existing ancestors too: macOS permits /var and /tmp system aliases.
+async function canonicalPath(path) {
+  try {
+    return await realpath(path);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw new AppError("STORE_UNSAFE");
+    return join(await canonicalPath(dirname(path)), basename(path));
+  }
+}
+// Freeze persistent paths and reject destructive destinations before consent or replacement.
+export async function prepareProfile(profile, { configDir } = {}) {
   validateProfile(profile);
+  profile = structuredClone(profile);
+  const path = resolve(profilePath(profile.name, configDir));
+  configDir = dirname(path);
+  if (profile.clientSource.file)
+    profile.clientSource.file = resolve(profile.clientSource.file);
+  if (profile.store.path) profile.store.path = resolve(profile.store.path);
+  const destination = await canonicalPath(path);
+  const comparable = (path) =>
+    process.platform === "win32" ? path.toLowerCase() : path;
+  const references = [profile.clientSource.file, profile.store.path].filter(Boolean);
+  for (const reference of references)
+    if (comparable(await canonicalPath(reference)) === comparable(destination))
+      throw new AppError("INVALID_CONFIG");
+  try {
+    await loadProfile(profile.name, { configDir });
+  } catch (error) {
+    if (error.code !== "STORE_NOT_FOUND") throw error;
+  }
+  return { profile, configDir };
+}
+export async function saveProfile(profile, { configDir } = {}) {
+  ({ profile, configDir } = await prepareProfile(profile, { configDir }));
   const path = profilePath(profile.name, configDir);
   const text = JSON.stringify(profile, null, 2) + "\n";
   const options = profileFileOptions();

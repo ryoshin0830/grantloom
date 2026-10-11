@@ -179,3 +179,38 @@ test("profile operations reject writable intermediate config ancestors", async (
     (e) => e.code === "STORE_UNSAFE",
   );
 });
+
+test("profile save preserves existing non-profile bytes", async () => {
+  const configDir = await mkdtemp(join(tmpdir(), "grantloom-profile-collision-"));
+  const path = join(configDir, "work.json");
+  for (const original of [
+    "synthetic arbitrary bytes",
+    JSON.stringify(credential),
+    JSON.stringify({ tokens: { refresh_token: "synthetic-refresh" } }),
+  ]) {
+    await writeFile(path, original, { mode: 0o600 });
+    await assert.rejects(saveProfile(profile, { configDir }), { code: "INVALID_CONFIG" });
+    assert.equal(await readFile(path, "utf8"), original);
+  }
+});
+test("profile save normalizes persistent filesystem references", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "grantloom-profile-paths-"));
+  const originalCwd = process.cwd();
+  try {
+    process.chdir(dir);
+    await saveProfile(
+      {
+        ...profile,
+        clientSource: { file: "client.json" },
+        store: { kind: "env", path: "tokens.env" },
+      },
+      { configDir: "profiles" },
+    );
+    const saved = await loadProfile("work", { configDir: "profiles" });
+    assert.equal(saved.clientSource.file, join(process.cwd(), "client.json"));
+    assert.equal(saved.store.path, join(process.cwd(), "tokens.env"));
+    assert.deepEqual(profile.clientSource, { env: "TEST_CLIENT" });
+  } finally {
+    process.chdir(originalCwd);
+  }
+});

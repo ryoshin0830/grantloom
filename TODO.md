@@ -4,7 +4,7 @@
 - [x] Task 1: client/profile/store/scope foundations, tests, task self-review.
 - [ ] Task 2: implementation complete (consent session, verification, refresh, tests); awaiting independent review.
 - [ ] Task 3: implementation complete (CLI, MCP, Skill, documentation, packaging and CI); awaiting independent review.
-- [ ] Whole-branch Ponytail review and fix findings.
+- [ ] Whole-branch Ponytail review: final collision/path/listener fixes and refresh persistence regressions implemented; awaiting re-review.
 - [ ] Local package smoke test and secret-leak checks.
 - [ ] Create PR, verify CI, merge to main.
 - [ ] npm login, publish, verify registry and npx.

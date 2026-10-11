@@ -212,3 +212,58 @@ test("invalid stored expiry is rejected with a fixed safe error", async (t) => {
     code: "INVALID_RECORD",
   });
 });
+
+for (const failure of ["write", "final read", "final readback mismatch"])
+  test(`refresh refuses saved success after 1Password ${failure} failure`, async (t) => {
+    const { p, record, options } = await setup(t);
+    p.store = { kind: "1password", vault: "synthetic-vault", item: "synthetic-item" };
+    await saveProfile(p, options);
+    let item, refreshing = false, edited = false, readsAfterEdit = 0;
+    const op = async (args, transport) => {
+      if (args[1] === "list") return [];
+      if (args[1] === "create")
+        return item = { ...transport.input, id: "synthetic-item" };
+      if (args[1] === "get") {
+        if (edited && ++readsAfterEdit === 2) {
+          if (failure === "final read")
+            throw new Error("synthetic-client-secret synthetic-refresh-token");
+          if (failure === "final readback mismatch")
+            return {
+              ...item,
+              fields: item.fields.map((f) => f.label === "access_token"
+                ? { ...f, value: "synthetic-stale-token" } : f),
+            };
+        }
+        return item;
+      }
+      if (args[1] === "edit") {
+        if (refreshing && failure === "write")
+          throw new Error("synthetic-client-secret synthetic-refresh-token");
+        item = { ...transport.input, id: "synthetic-item" };
+        edited = refreshing;
+        return item;
+      }
+      throw new Error("Unexpected synthetic op operation");
+    };
+    // Build the synthetic item through the real store field encoder, without contacting op.
+    const initialStore = createStore(
+      { kind: "1password", vault: "synthetic-vault", title: "synthetic" },
+      { op },
+    );
+    await initialStore.write(record);
+    refreshing = true;
+    const fake = fakeOAuth();
+    const expectedCode = failure === "final readback mismatch"
+      ? "STORE_MISMATCH" : "OP_FAILED";
+    await assert.rejects(
+      refreshProfile(p.name, { ...options, op, oauthFactory: fake.factory }),
+      (error) => error.code === expectedCode && !error.message.includes("synthetic"),
+    );
+    assert.deepEqual(fake.calls.map((c) => c[0]), ["refresh", "info"]);
+    if (failure !== "write") assert.equal(readsAfterEdit, 2);
+    else
+      assert.equal(
+        item.fields.find((f) => f.label === "access_token").value,
+        record.tokens.access_token,
+      );
+  });

@@ -139,3 +139,12 @@ test("Windows-targeted CLI help works without credentials", async () => {
   assert.match(stdout, /1password/);
   assert.equal(stderr, "");
 });
+
+test("Windows profile save preserves non-profile bytes", async (t) => {
+  const configDir = await setup(t);
+  const path = join(configDir, profile.name + ".json");
+  const original = "synthetic unrelated descriptor bytes";
+  await writeFile(path, original);
+  await assert.rejects(saveProfile(profile, { configDir }), { code: "INVALID_CONFIG" });
+  assert.equal(await readFile(path, "utf8"), original);
+});

@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { OAuth2Client } from "google-auth-library";
-import { loadClient, validateProfile, saveProfile } from "./config.js";
+import { loadClient, prepareProfile, saveProfile } from "./config.js";
 import { createStore, validateRecord } from "./stores.js";
 import { resolveScopes } from "./scopes.js";
 import { AppError, publicError } from "./errors.js";
@@ -100,8 +100,7 @@ export async function startAuth(
     op,
   } = {},
 ) {
-  validateProfile(profile);
-  profile = structuredClone(profile);
+  ({ profile, configDir } = await prepareProfile(profile, { configDir }));
   const requestedScopes = resolveScopes(profile.scopes);
   if (
     !Number.isFinite(timeoutMs) ||
@@ -245,6 +244,7 @@ export async function startAuth(
   };
   const completion = (res) => {
     if (res.destroyed) {
+      close();
       settle();
       return;
     }

@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, stat, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, stat, mkdir, readFile, writeFile, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { request, createServer } from "node:http";
 import { startAuth } from "../src/auth.js";
 import { createStore } from "../src/stores.js";
+import { profileStatus, refreshProfile, profileEnvironment } from "../src/service.js";
 import { loadProfile } from "../src/config.js";
 import {
   env,
@@ -218,13 +219,14 @@ test("readback mismatch never reports saved", async (t) => {
 test("profile write failure after token save is retryable", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "grantloom-profile-failure-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  await mkdir(join(dir, "blocked"), { mode: 0o777 });
+  await mkdir(join(dir, "blocked"), { mode: 0o700 });
   const { session, fake } = await setup(t, {
     start: { configDir: join(dir, "blocked") },
   });
+  const { chmod } = await import("node:fs/promises");
+  await chmod(join(dir, "blocked"), 0o777);
   await fetch(callback(session));
   assert.equal((await session.done).status, "save-failed");
-  const { chmod } = await import("node:fs/promises");
   await chmod(join(dir, "blocked"), 0o700);
   assert.equal((await session.retrySave()).status, "saved");
   assert.equal(fake.calls.length, 5);
@@ -640,4 +642,120 @@ test("retry on an already-saved session cannot expire its successful status", as
   clock += 1001;
   await assert.rejects(session.retrySave(), { code: "INVALID_CONFIG" });
   assert.equal(session.status().status, "saved");
+});
+
+for (const kind of ["client", "json", "env", "existing unrelated"])
+  test(`auth rejects profile destination collision before consent: ${kind}`, async (t) => {
+    const dir = await mkdtemp(join(tmpdir(), "grantloom-auth-collision-"));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    const p = profile(dir), configDir = join(dir, "profiles");
+    await mkdir(configDir, { mode: 0o700 });
+    const destination = join(configDir, p.name + ".json");
+    const original = kind === "client" ? env.TEST_CLIENT : "synthetic unrelated private bytes";
+    if (kind === "client") p.clientSource = { file: destination };
+    else if (kind !== "existing unrelated")
+      p.store = {
+        kind,
+        path: join(configDir, "..", "profiles", p.name + ".json"),
+      };
+    if (kind === "client" || kind === "existing unrelated")
+      await writeFile(destination, original, { mode: 0o600 });
+    const fake = fakeOAuth();
+    await assert.rejects(async () => {
+      const session = await startAuth(p, { env, configDir, oauthFactory: fake.factory });
+      await session.cancel();
+    }, { code: "INVALID_CONFIG" });
+    assert.equal(fake.oauth, undefined);
+    if (kind === "client" || kind === "existing unrelated")
+      assert.equal(await readFile(destination, "utf8"), original);
+    else await assert.rejects(readFile(destination), { code: "ENOENT" });
+  });
+test("relative auth references survive cwd change before save and subsequent profile operations", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "grantloom-auth-paths-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const originalCwd = process.cwd();
+  const otherDir = join(dir, "other");
+  await mkdir(otherDir, { mode: 0o700 });
+  let session;
+  try {
+    process.chdir(dir);
+    await writeFile("client.json", env.TEST_CLIENT, { mode: 0o600 });
+    const base = process.cwd();
+    const p = {
+      ...profile(dir),
+      clientSource: { file: "client.json" },
+      store: { kind: "json", path: "tokens.json" },
+    };
+    session = await startAuth(p, { configDir: "profiles", oauthFactory: fakeOAuth().factory });
+    process.chdir(otherDir);
+    assert.equal((await fetch(callback(session))).status, 200);
+    assert.equal((await session.done).status, "saved");
+    const options = { configDir: join(base, "profiles") };
+    const saved = await loadProfile(p.name, options);
+    assert.equal(saved.clientSource.file, join(base, "client.json"));
+    assert.equal(saved.store.path, join(base, "tokens.json"));
+    assert.equal((await profileStatus(p.name, options)).status, "saved");
+    assert.equal(
+      (await refreshProfile(p.name, {
+        ...options, oauthFactory: fakeOAuth().factory,
+      })).status,
+      "saved",
+    );
+    assert.equal(
+      (await profileEnvironment(p.name, options)).GRANTLOOM_REFRESH_TOKEN,
+      "synthetic-refresh-token",
+    );
+    assert.equal(p.clientSource.file, "client.json");
+    await assert.rejects(readFile(join(otherDir, "tokens.json")), { code: "ENOENT" });
+  } finally {
+    process.chdir(originalCwd);
+    await session?.cancel();
+  }
+});
+for (const error of [false, true])
+  test(`disconnected callback releases listener after ${error ? "failed" : "saved"} completion`, async (t) => {
+    let release, entered;
+    const waiting = new Promise((r) => { release = r; });
+    const called = new Promise((r) => { entered = r; });
+    const fake = fakeOAuth({ wait: waiting, error });
+    const factory = (options) => {
+      const oauth = fake.factory(options), getToken = oauth.getToken;
+      oauth.getToken = (request) => {
+        entered();
+        return getToken(request);
+      };
+      return oauth;
+    };
+    const { session } = await setup(t, { start: { oauthFactory: factory } });
+    const req = request(callback(session));
+    req.on("error", () => {});
+    req.end();
+    await called;
+    const disconnected = new Promise((r) => req.once("close", r));
+    req.destroy();
+    await disconnected;
+    // Let the server observe the socket close before verification finishes.
+    await new Promise((r) => setTimeout(r, 20));
+    release();
+    assert.equal((await session.done).status, error ? "failed" : "saved");
+    const probe = createServer();
+    await new Promise((resolve, reject) => {
+      probe.once("error", reject);
+      probe.listen(Number(new URL(session.redirectUri).port), "127.0.0.1", resolve);
+    });
+    await new Promise((r) => probe.close(r));
+  });
+
+test("auth rejects a new store collision through permitted macOS system aliases", { skip: process.platform !== "darwin" }, async (t) => {
+  const dir = await realpath(await mkdtemp("/tmp/grantloom-auth-alias-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const p = profile(dir);
+  p.store.path = join(dir.replace("/private/tmp/", "/tmp/"), p.name + ".json");
+  const fake = fakeOAuth();
+  await assert.rejects(async () => {
+    const session = await startAuth(p, { env, configDir: dir, oauthFactory: fake.factory });
+    await session.cancel();
+  }, { code: "INVALID_CONFIG" });
+  assert.equal(fake.oauth, undefined);
+  await assert.rejects(readFile(join(dir, p.name + ".json")), { code: "ENOENT" });
 });
