@@ -18,5 +18,5 @@
 - [PR #1](https://github.com/ryoshin0830/grantloom/pull/1), merged 2026-10-11; merge commit `fe5dbd5`.
 - [Release-head CI](https://github.com/ryoshin0830/grantloom/actions/runs/38136901847): Ubuntu/macOS Node 22 and 24, Windows profile Node 24; all successful.
 - Merged main: 148 tests passed, no failures/cancellations/skips; syntax and diff checks passed.
-- `grantloom@0.1.0` publication is awaiting npm's additional security-key authentication. Registry/npx/MCP verification is still pending.
+- `grantloom@0.1.0` remains unpublished. npm's additional security-key authentication session became invalid before completion; restart publication when the user can authenticate. Registry/npx/MCP verification is still pending.
 - Live Google consent is separate from publication. No account-specific configuration or token values are included in this repository.
