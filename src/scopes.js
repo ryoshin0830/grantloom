@@ -194,6 +194,7 @@ export async function listScopes({
         if (
           !data ||
           typeof data !== "object" ||
+          Array.isArray(data) ||
           (data.services !== undefined && !Array.isArray(data.services)) ||
           (data.nextPageToken !== undefined &&
             typeof data.nextPageToken !== "string")

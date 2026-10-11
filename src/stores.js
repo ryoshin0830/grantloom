@@ -199,23 +199,11 @@ export function createStore(options, { env = process.env, op = runOp } = {}) {
   const run = (args) => callOp(op, args, opts);
   async function resolveItem() {
     if (resolved && itemId) return itemId;
-    const items = await run([
-      "item",
-      "list",
-      "--vault",
-      o.vault,
-      "--format",
-      "json",
-    ]);
-    if (!Array.isArray(items)) throw new AppError("OP_FAILED");
-    const title = o.item ?? o.title;
-    const matches = items.filter((item) => item.title === title);
-    if (matches.length > 1) throw new AppError("STORE_AMBIGUOUS");
     if (o.item) {
       const item = await run([
         "item",
         "get",
-        matches[0]?.id ?? o.item,
+        o.item,
         "--vault",
         o.vault,
         "--format",
@@ -224,7 +212,20 @@ export function createStore(options, { env = process.env, op = runOp } = {}) {
       ]);
       if (!text(item?.id)) throw new AppError("OP_FAILED");
       itemId = item.id;
-    } else itemId = matches[0]?.id;
+    } else {
+      const items = await run([
+        "item",
+        "list",
+        "--vault",
+        o.vault,
+        "--format",
+        "json",
+      ]);
+      if (!Array.isArray(items)) throw new AppError("OP_FAILED");
+      const matches = items.filter((item) => item.title === o.title);
+      if (matches.length > 1) throw new AppError("STORE_AMBIGUOUS");
+      itemId = matches[0]?.id;
+    }
     resolved = true;
     return itemId;
   }

@@ -237,3 +237,24 @@ test("Discovery normalizes email aliases without rejecting a valid document", as
   });
   assert.ok(result.candidates.some((c) => c.uri === "email"));
 });
+test("malformed Service Usage top-level containers remain unavailable", async () => {
+  for (const value of [
+    [],
+    [{}],
+    null,
+    "synthetic-malformed",
+    42,
+    { services: {} },
+    { services: null },
+  ]) {
+    const result = await listScopes({
+      projectId: "test-project",
+      cloudTokenEnv: "CLOUD",
+      env: { CLOUD: "synthetic" },
+      fetch: async () => response(value),
+    });
+    assert.equal(result.enabledStatus, "unavailable");
+    assert.deepEqual(result.enabledApis, []);
+    assert.ok(result.candidates.every((c) => c.enabledStatus === "unverified"));
+  }
+});

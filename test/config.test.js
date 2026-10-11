@@ -164,3 +164,18 @@ test("undefined or non-string descriptors cannot pass name validation", async ()
       (e) => e.code === "INVALID_CONFIG",
     );
 });
+test("profile operations reject writable intermediate config ancestors", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "grantloom-"));
+  const configDir = join(dir, "ancestor", "private");
+  await saveProfile(profile, { configDir });
+  const { chmod } = await import("node:fs/promises");
+  await chmod(join(dir, "ancestor"), 0o777);
+  await assert.rejects(
+    saveProfile(profile, { configDir }),
+    (e) => e.code === "STORE_UNSAFE",
+  );
+  await assert.rejects(
+    loadProfile("work", { configDir }),
+    (e) => e.code === "STORE_UNSAFE",
+  );
+});

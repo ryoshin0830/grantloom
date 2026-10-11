@@ -277,3 +277,67 @@ test("Windows file stores fail explicitly while 1password remains available", as
     Object.defineProperty(process, "platform", descriptor);
   }
 });
+test("explicit 1password item ID cannot be redirected by a matching title", async () => {
+  const fake = fakeOp();
+  const original = createStore(
+    { kind: "1password", vault: "v", title: "original" },
+    { op: fake.op },
+  );
+  await original.write(record);
+  const originalItem = structuredClone(fake.items[0]);
+  fake.items.push({
+    ...structuredClone(originalItem),
+    id: "other-id",
+    title: originalItem.id,
+  });
+  const store = createStore(
+    { kind: "1password", vault: "v", item: originalItem.id },
+    { op: fake.op },
+  );
+  await store.preflight();
+  const reference = await store.write({
+    ...record,
+    tokens: { ...record.tokens, access_token: "updated-synthetic" },
+  });
+  assert.equal(reference.item, originalItem.id);
+  assert.equal(
+    fake.items
+      .find((i) => i.id === "other-id")
+      .fields.find((f) => f.label === "access_token").value,
+    record.tokens.access_token,
+  );
+  assert.equal(
+    fake.items
+      .find((i) => i.id === originalItem.id)
+      .fields.find((f) => f.label === "access_token").value,
+    "updated-synthetic",
+  );
+});
+for (const mode of [0o777, 0o770, 0o1777])
+  test(`file stores reject writable intermediate ancestors (${mode.toString(8)})`, async () => {
+    const dir = await mkdtemp(join(tmpdir(), "grantloom-"));
+    const { mkdir } = await import("node:fs/promises");
+    const ancestor = join(dir, "ancestor");
+    const privateDir = join(ancestor, "private");
+    await mkdir(privateDir, { recursive: true, mode: 0o700 });
+    for (const kind of ["json", "env"]) {
+      const store = createStore({ kind, path: join(privateDir, kind) });
+      await store.write(record);
+      const before = await readFile(join(privateDir, kind), "utf8");
+      await chmod(ancestor, mode);
+      await assert.rejects(store.preflight(), (e) => e.code === "STORE_UNSAFE");
+      await assert.rejects(store.read(), (e) => e.code === "STORE_UNSAFE");
+      await assert.rejects(
+        store.write(record),
+        (e) => e.code === "STORE_UNSAFE",
+      );
+      assert.equal(await readFile(join(privateDir, kind), "utf8"), before);
+      await chmod(ancestor, 0o700);
+    }
+  });
+test("trusted system temporary parent still supports private file storage", async () => {
+  const dir = await mkdtemp("/tmp/grantloom-");
+  const store = createStore({ kind: "json", path: join(dir, "tokens") });
+  await store.write(record);
+  assert.deepEqual(await store.read(), record);
+});

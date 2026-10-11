@@ -1,18 +1,30 @@
 import { constants } from "node:fs";
-import { mkdir, lstat, open, rename, unlink } from "node:fs/promises";
+import { mkdir, lstat, open, rename, unlink, readlink } from "node:fs/promises";
 import { dirname, resolve, parse, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AppError } from "./errors.js";
-export async function inspectPath(
-  path,
-  { directory = false, missing = false } = {},
-) {
-  if (process.platform === "win32")
-    throw new AppError("FILE_STORE_UNSUPPORTED");
+const systemTemporary = new Set(
+  process.platform === "darwin"
+    ? ["/tmp", "/var/tmp", "/private/tmp", "/private/var/tmp"]
+    : ["/tmp", "/var/tmp"],
+);
+function inspectAncestor(info, path) {
+  if (!info.isDirectory() || ![0, process.getuid()].includes(info.uid))
+    throw new AppError("STORE_UNSAFE");
+  if (
+    (info.mode & 0o022) !== 0 &&
+    !(info.uid === 0 && (info.mode & 0o1000) !== 0 && systemTemporary.has(path))
+  )
+    throw new AppError("STORE_UNSAFE");
+}
+async function inspectChain(path, { directory, missing, privateFinal = true }) {
   const absolute = resolve(path);
   let cursor = parse(absolute).root;
-  for (const part of absolute.slice(cursor.length).split("/").filter(Boolean)) {
-    cursor = join(cursor, part);
+  inspectAncestor(await lstat(cursor), cursor);
+  const parts = absolute.slice(cursor.length).split("/").filter(Boolean);
+  for (let index = 0; index < parts.length; index++) {
+    cursor = join(cursor, parts[index]);
+    const final = index === parts.length - 1;
     let info;
     try {
       info = await lstat(cursor);
@@ -20,25 +32,41 @@ export async function inspectPath(
       if (e.code === "ENOENT" && missing) return false;
       throw new AppError("STORE_UNSAFE");
     }
-    // macOS exposes its system temporary directories through these root-owned links.
-    if (
-      info.isSymbolicLink() &&
-      !(
-        process.platform === "darwin" &&
-        ["/var", "/tmp"].includes(cursor) &&
-        cursor !== absolute
+    if (info.isSymbolicLink()) {
+      const target = { "/var": "/private/var", "/tmp": "/private/tmp" }[cursor];
+      if (
+        process.platform !== "darwin" ||
+        final ||
+        info.uid !== 0 ||
+        !target ||
+        resolve(dirname(cursor), await readlink(cursor)) !== target
       )
-    )
-      throw new AppError("STORE_UNSAFE");
-    if (cursor === absolute) {
+        throw new AppError("STORE_UNSAFE");
+      // Inspect the actual system-link target chain before following it.
+      await inspectChain(target, {
+        directory: true,
+        missing: false,
+        privateFinal: false,
+      });
+      cursor = target;
+      info = await lstat(cursor);
+    }
+    if (final && privateFinal) {
       if (directory ? !info.isDirectory() : !info.isFile())
         throw new AppError("STORE_UNSAFE");
       if ((info.mode & 0o077) !== 0 || info.uid !== process.getuid())
         throw new AppError("STORE_UNSAFE");
-    } else if (!info.isDirectory() && !info.isSymbolicLink())
-      throw new AppError("STORE_UNSAFE");
+    } else inspectAncestor(info, cursor);
   }
   return true;
+}
+export async function inspectPath(
+  path,
+  { directory = false, missing = false } = {},
+) {
+  if (process.platform === "win32")
+    throw new AppError("FILE_STORE_UNSUPPORTED");
+  return inspectChain(path, { directory, missing });
 }
 export async function prepareFile(path) {
   if (process.platform === "win32")
