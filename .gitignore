@@ -1,0 +1,6 @@
+node_modules/
+.superpowers/
+*.tgz
+.env*
+coverage/
+npm-debug.log*
