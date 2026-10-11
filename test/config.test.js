@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile, readFile, stat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { loadClient, saveProfile, loadProfile } from "../src/config.js";
 import { AppError, publicError } from "../src/errors.js";
 const credential = {
@@ -213,4 +215,49 @@ test("profile save normalizes persistent filesystem references", async () => {
   } finally {
     process.chdir(originalCwd);
   }
+});
+
+test("unavailable Windows root fails safely with bounded lookup before OAuth starts", async () => {
+  const script = `
+    import { createRequire, syncBuiltinESMExports } from "node:module";
+    const require = createRequire(import.meta.url);
+    const path = require("node:path"), fs = require("node:fs/promises");
+    const { startAuth } = await import(${JSON.stringify(new URL("../src/auth.js", import.meta.url).href)});
+    for (const key of ["join", "resolve", "dirname", "basename"])
+      path[key] = path.win32[key];
+    const requests = [];
+    fs.realpath = async (file) => {
+      requests.push(file);
+      // Bound a regression's recursion so the test cannot itself hang.
+      throw Object.assign(new Error("synthetic unavailable drive"), {
+        code: requests.length > 3 ? "EIO" : "ENOENT",
+      });
+    };
+    syncBuiltinESMExports();
+    let oauthStarts = 0;
+    try {
+      await startAuth({
+        version: 1, name: "synthetic", account: "you@example.com",
+        clientSource: { env: "TEST_CLIENT" }, scopes: ["openid", "email"],
+        store: { kind: "1password", vault: "synthetic-vault", item: "synthetic-item" },
+      }, {
+        configDir: ${JSON.stringify("Z:\\missing")},
+        oauthFactory: () => { oauthStarts++; },
+      });
+      throw new Error("Unexpected synthetic auth success");
+    } catch (error) {
+      process.stdout.write(JSON.stringify({ code: error.code, message: error.message, requests, oauthStarts }));
+    }
+  `;
+  const { stdout, stderr } = await promisify(execFile)(process.execPath, [
+    "--input-type=module", "-e", script,
+  ]);
+  const result = JSON.parse(stdout);
+  assert.equal(result.code, "STORE_UNSAFE");
+  assert.equal(result.message, "Storage permissions or path are unsafe.");
+  assert.deepEqual(result.requests, [
+    "Z:\\missing\\synthetic.json", "Z:\\missing", "Z:\\",
+  ]);
+  assert.equal(result.oauthStarts, 0);
+  assert.equal(stderr, "");
 });

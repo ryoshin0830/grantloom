@@ -214,7 +214,9 @@ async function canonicalPath(path) {
     return await realpath(path);
   } catch (error) {
     if (error.code !== "ENOENT") throw new AppError("STORE_UNSAFE");
-    return join(await canonicalPath(dirname(path)), basename(path));
+    const parent = dirname(path);
+    if (parent === path) throw new AppError("STORE_UNSAFE");
+    return join(await canonicalPath(parent), basename(path));
   }
 }
 // Freeze persistent paths and reject destructive destinations before consent or replacement.
