@@ -672,3 +672,229 @@ test("slow browser launcher cannot keep completed CLI alive and receives exact U
   assert(elapsed < 2000, `launcher held process for ${elapsed}ms`);
   clean(r);
 });
+for (const early of [false, true])
+  test(`interactive descriptor EOF${early ? " before prompt" : ""} cancels without hanging or leaking listeners`, async () => {
+    const { PassThrough } = await import("node:stream");
+    const { EventEmitter, once } = await import("node:events");
+    const input = new PassThrough();
+    input.isTTY = true;
+    const error = new PassThrough();
+    const signals = new EventEmitter();
+    let output = "";
+    if (early) {
+      input.resume();
+      const ended = once(input, "end");
+      input.end();
+      await ended;
+    } else error.on("data", () => input.end());
+    const running = runCLI(["auth", "--json"], {
+      input,
+      error,
+      signals,
+      output: {
+        write: (s) => {
+          output += s;
+        },
+      },
+    });
+    let timer;
+    const timeout = new Promise((r) => {
+      timer = setTimeout(() => r("timeout"), 100);
+    });
+    try {
+      const code = await Promise.race([running, timeout]);
+      assert.equal(code, 130);
+      assert.deepEqual(JSON.parse(output), {
+        code: "AUTH_CANCELLED",
+        message: "Authentication was cancelled.",
+      });
+      clean(output);
+      assert.equal(signals.listenerCount("SIGINT"), 0);
+      assert.equal(input.listenerCount("end"), 0);
+    } finally {
+      clearTimeout(timer);
+      signals.emit("SIGINT");
+      await running;
+      error.destroy();
+      input.destroy();
+    }
+  });
+test("EOF at actual save-failed retry prompt clears retained verification and closes callback", async (t) => {
+  const f = await setup(t);
+  const { PassThrough } = await import("node:stream");
+  const { EventEmitter } = await import("node:events");
+  const { startAuth } = await import("../src/auth.js");
+  const { fakeOAuth } = await import("../fixtures/oauth.js");
+  const input = new PassThrough();
+  input.isTTY = true;
+  const error = new PassThrough();
+  const signals = new EventEmitter();
+  let output = "",
+    session,
+    cancels = 0;
+  error.on("data", (s) => {
+    if (s.toString().includes("Save failed.")) input.end();
+  });
+  const store = createStore({ kind: "json", path: join(f.dir, "eof.json") });
+  const running = runCLI(
+    [
+      "auth",
+      "--client-env",
+      "TEST_CLIENT",
+      "--account",
+      f.p.account,
+      "--scope",
+      f.p.scopes[0],
+      "--store",
+      "json",
+      "--output",
+      join(f.dir, "eof.json"),
+      "--profile",
+      "eof",
+      "--json",
+    ],
+    {
+      env,
+      input,
+      error,
+      signals,
+      output: {
+        write: (s) => {
+          output += s;
+        },
+      },
+      authOptions: {
+        configDir: join(f.dir, "profiles"),
+        oauthFactory: fakeOAuth().factory,
+        store: {
+          ...store,
+          write: async () => {
+            throw new Error(markers.join(" "));
+          },
+        },
+      },
+      services: {
+        startAuth: async (...args) => {
+          session = await startAuth(...args);
+          return {
+            ...session,
+            cancel: () => {
+              cancels++;
+              return session.cancel();
+            },
+          };
+        },
+      },
+      open: async (url) => {
+        const u = new URL(url);
+        const cb = new URL(u.searchParams.get("redirect_uri"));
+        cb.searchParams.set("state", u.searchParams.get("state"));
+        cb.searchParams.set("code", "synthetic-code");
+        await fetch(cb).catch(() => {});
+        return false;
+      },
+    },
+  );
+  let timer;
+  const timeout = new Promise((r) => {
+    timer = setTimeout(() => r("timeout"), 250);
+  });
+  try {
+    const code = await Promise.race([running, timeout]);
+    assert.equal(code, 130);
+    assert.equal(cancels, 1);
+    assert.equal(JSON.parse(output).status, "cancelled");
+    assert.equal(session.status().status, "cancelled");
+    await assert.rejects(session.retrySave());
+    await assert.rejects(fetch(session.redirectUri));
+    clean(output);
+    assert.equal(signals.listenerCount("SIGINT"), 0);
+    assert.equal(input.listenerCount("end"), 0);
+  } finally {
+    clearTimeout(timer);
+    signals.emit("SIGINT");
+    await running;
+    await session?.cancel();
+    error.destroy();
+    input.destroy();
+  }
+});
+test("interactive EOF during an already-started commit waits and reports saved", async (t) => {
+  const f = await setup(t);
+  const { PassThrough } = await import("node:stream");
+  const { EventEmitter } = await import("node:events");
+  const { fakeOAuth } = await import("../fixtures/oauth.js");
+  const input = new PassThrough();
+  input.isTTY = true;
+  const error = new PassThrough();
+  const signals = new EventEmitter();
+  let output = "",
+    ended = false;
+  error.on("data", (s) => {
+    if (s.toString().includes("Profile name:")) input.write("eof-commit\n");
+  });
+  const store = createStore({
+    kind: "json",
+    path: join(f.dir, "eof-commit.json"),
+  });
+  const blocking = {
+    ...store,
+    write: async (record) => {
+      await new Promise((r) => setImmediate(r));
+      input.end();
+      await new Promise((r) => setImmediate(r));
+      ended = true;
+      assert.equal(output, "");
+      return store.write(record);
+    },
+  };
+  const code = await runCLI(
+    [
+      "auth",
+      "--client-env",
+      "TEST_CLIENT",
+      "--account",
+      f.p.account,
+      "--scope",
+      f.p.scopes[0],
+      "--store",
+      "json",
+      "--output",
+      join(f.dir, "eof-commit.json"),
+      "--json",
+    ],
+    {
+      env,
+      input,
+      error,
+      signals,
+      output: {
+        write: (s) => {
+          output += s;
+        },
+      },
+      authOptions: {
+        configDir: join(f.dir, "profiles"),
+        oauthFactory: fakeOAuth().factory,
+        store: blocking,
+      },
+      open: async (url) => {
+        const u = new URL(url);
+        const cb = new URL(u.searchParams.get("redirect_uri"));
+        cb.searchParams.set("state", u.searchParams.get("state"));
+        cb.searchParams.set("code", "synthetic-code");
+        await fetch(cb).catch(() => {});
+        return false;
+      },
+    },
+  );
+  assert.equal(ended, true);
+  assert.equal(code, 0);
+  assert.equal(JSON.parse(output).status, "saved");
+  assert.equal((await store.read()).account, f.p.account);
+  clean(output);
+  assert.equal(signals.listenerCount("SIGINT"), 0);
+  assert.equal(input.listenerCount("end"), 0);
+  error.destroy();
+  input.destroy();
+});

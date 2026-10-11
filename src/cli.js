@@ -304,13 +304,18 @@ export async function runCLI(
   const abort = new AbortController();
   const emit = (value) => output.write(JSON.stringify(value) + "\n");
   const interrupt = () => {
+    if (cancelled) return;
     cancelled = true;
     abort.abort();
     if (session) cancelPromise = session.cancel();
   };
   const ask = async (question) => {
     if (!input.isTTY) invalid();
-    rl ??= createInterface({ input, output: error });
+    if (!rl) {
+      rl = createInterface({ input, output: error });
+      rl.once("close", interrupt);
+    }
+    if (input.readableEnded || input.destroyed) interrupt();
     return (await rl.question(question, { signal: abort.signal })).trim();
   };
   signals.on("SIGINT", interrupt);
@@ -414,7 +419,7 @@ export async function runCLI(
     if (cancelled) {
       emit(
         session
-          ? await session.cancel()
+          ? await (cancelPromise ?? session.cancel())
           : {
               code: "AUTH_CANCELLED",
               message: "Authentication was cancelled.",
@@ -430,6 +435,7 @@ export async function runCLI(
       ? 2
       : 1;
   } finally {
+    rl?.off("close", interrupt);
     rl?.close();
     signals.off("SIGINT", interrupt);
     if (
