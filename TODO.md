@@ -2,7 +2,7 @@
 
 - [x] Design approved; create public personal GitHub repository.
 - [x] Task 1: client/profile/store/scope foundations, tests, task self-review.
-- [ ] Task 2: consent session, verification, refresh, tests, task review.
+- [ ] Task 2: implementation complete (consent session, verification, refresh, tests); awaiting independent review.
 - [ ] Task 3: CLI, MCP, Skill, documentation, packaging and CI, task review.
 - [ ] Whole-branch Ponytail review and fix findings.
 - [ ] Local package smoke test and secret-leak checks.

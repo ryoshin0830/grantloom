@@ -175,7 +175,7 @@ function validateName(name) {
   if (typeof name !== "string" || !/^[a-z0-9][a-z0-9-]{0,62}$/.test(name))
     throw new AppError("INVALID_CONFIG");
 }
-function validateProfile(profile) {
+export function validateProfile(profile) {
   if (
     !keys(profile, [
       "version",

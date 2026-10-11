@@ -15,6 +15,16 @@ export const ERROR_MESSAGES = Object.freeze({
   SCOPES_INVALID: "Scope selection is invalid.",
   CLOUD_FAILED: "Enabled API listing is unavailable.",
   DISCOVERY_FAILED: "API scope discovery is unavailable.",
+  OAUTH_FAILED: "Google authentication failed.",
+  OAUTH_DENIED: "Google consent was denied.",
+  TOKEN_INVALID: "Google token verification failed.",
+  ACCOUNT_MISMATCH:
+    "The verified Google account does not match the requested account.",
+  SCOPES_MISSING: "The granted scopes do not include all requested scopes.",
+  REFRESH_MISSING: "Google did not return a refresh token; repeat consent.",
+  AUTH_CANCELLED: "Authentication was cancelled.",
+  AUTH_EXPIRED: "Authentication session expired.",
+  TOKEN_EXPIRED: "The access token has expired; refresh the profile.",
   INTERNAL_ERROR: "The operation failed.",
 });
 export class AppError extends Error {
