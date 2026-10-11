@@ -205,18 +205,28 @@ const profilePath = (name, configDir) =>
       join(homedir(), ".config", "grantloom"),
     `${name}.json`,
   );
+// Windows profiles contain references only; OS directory permissions protect metadata.
+const profileFileOptions = () =>
+  process.platform === "win32" ? { private: false } : {};
 export async function saveProfile(profile, { configDir } = {}) {
   validateProfile(profile);
-  await atomicWrite(
-    profilePath(profile.name, configDir),
-    JSON.stringify(profile, null, 2) + "\n",
-  );
+  const path = profilePath(profile.name, configDir);
+  const text = JSON.stringify(profile, null, 2) + "\n";
+  const options = profileFileOptions();
+  await atomicWrite(path, text, options);
+  if (
+    process.platform === "win32" &&
+    (await readPrivate(path, options)) !== text
+  )
+    throw new AppError("STORE_MISMATCH");
 }
 export async function loadProfile(name, { configDir } = {}) {
   validateName(name);
   let profile;
   try {
-    profile = JSON.parse(await readPrivate(profilePath(name, configDir)));
+    profile = JSON.parse(
+      await readPrivate(profilePath(name, configDir), profileFileOptions()),
+    );
   } catch (e) {
     if (e instanceof AppError) throw e;
     throw new AppError("INVALID_CONFIG");
