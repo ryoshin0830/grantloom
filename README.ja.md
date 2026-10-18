@@ -36,7 +36,7 @@ Googleとは無関係の独立プロジェクトです。Grantloom独自の認�
 | アクセストークンを更新する | 保存済みprofileを使って更新し、検証後に同じ保存先を書き換える |
 | 自分のスクリプトで認証情報を使う | `exec`で子プロセスの環境変数へ注入 |
 | AIエージェントに認証手続きを手伝わせる | CLI・MCP全7ツール・Skillを提供 |
-| 選べる権限を調べる | scopeの別名一覧、任意のAPI Discovery、有効APIの確認に対応 |
+| 選べる権限を調べる | 一般的なscope候補、任意のAPI Discovery、有効APIの確認に対応 |
 
 担当は**認証・権限・認証情報の受け渡し**です。Grantloom自体がメールを読んだり、送信したり、スプレッドシートを編集したりするわけではありません。その仕事は認証情報を使うプログラムが担当します。ホテルの鍵を渡す係であって、清掃から朝食まで全部やる係ではありません。
 
@@ -303,6 +303,15 @@ grantloom scopes --project-id YOUR_PROJECT_ID \
 **APIが有効 ≠ アカウントが権限に同意済み。** この2つは別の条件です。自動ドアに電源が入っていても、入館証が発行されたことにはなりません。
 
 有効APIの確認には、project IDとService Usageの読み取り権限を持つ**別のCloud閲覧用認証情報**が必要です。トークンファイルの内容はCloud access tokenのみ、環境変数オプションは変数名を指定します。Cloud入力元は同時に1つです。`op://VAULT/ITEM/FIELD` の各要素内に空白やスラッシュがある場合はpercent-encodeしてください。
+
+**Cloudトークンファイルにも非公開権限が必要です。** macOS/Linuxでは、自分が所有する権限 `0700` のディレクトリへ置き、ファイルは `0600` にします。危険な権限・symlink・他者が書き込める親ディレクトリがあると、Googleへ問い合わせる前に `unavailable` になる場合があります。例のパスへトークンファイルを非公開で用意した後、次を設定してください。
+
+```sh
+chmod 700 "$HOME/.config/google"
+chmod 600 "$HOME/.config/google/cloud-read-token"
+```
+
+WindowsのCloud入力には `--cloud-token-env` または `--cloud-token-op` を使ってください。Cloudトークンファイルからの読み込みは非対応です。
 
 Cloud認証情報なしでは `unverified`、一覧取得失敗では `unavailable` となり、手動のscope選択は引き続き使えます。これらのオプションは `auth` にも使えます。projectはクライアントJSONから取得でき、`--project-id` で上書きできます。Google APIの有効化や、ユーザー同意へのCloud scope追加は行いません。
 

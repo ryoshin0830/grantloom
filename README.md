@@ -36,7 +36,7 @@ An independent project, unaffiliated with Google. No hosted authentication servi
 | Obtain a fresh access token | Refreshes an existing profile, verifies the result, and updates the same store |
 | Let a script use credentials | `exec` injects credentials into that script's environment |
 | Let an AI agent coordinate authentication | Provides a CLI, seven MCP tools, and an agent Skill |
-| See which permissions exist | Lists common aliases, optional API Discovery scopes, and optionally enabled APIs |
+| See which permissions exist | Lists common scope candidates, optional API Discovery scopes, and optionally enabled APIs |
 
 Grantloom manages **authorization and credentials**. It does not itself read your inbox, send email, edit spreadsheets, or organize your Drive. Those jobs belong to the program using the credentials. Grantloom is the key desk, not the entire hotel staff.
 
@@ -303,6 +303,15 @@ grantloom scopes --project-id YOUR_PROJECT_ID \
 **Enabled API ≠ granted permission.** Switching the API on and getting account consent are separate requirements. The door having electricity does not mean you have a key.
 
 Enabled-API checks need a project ID and **separate Cloud read credentials** with Service Usage read permission. A token file contains only the Cloud access token; environment flags take variable names. Use one Cloud source at a time. Percent-encode spaces/slashes inside `op://VAULT/ITEM/FIELD` components.
+
+**Cloud token files need private permissions too.** On macOS/Linux, place the token file in a directory owned by your user with mode `0700`, and use mode `0600` for the file. Unsafe permissions, symlinks, or writable ancestors can make the lookup `unavailable` before any request reaches Google. After creating the token file privately at the example path, set:
+
+```sh
+chmod 700 "$HOME/.config/google"
+chmod 600 "$HOME/.config/google/cloud-read-token"
+```
+
+On Windows, use `--cloud-token-env` or `--cloud-token-op`; the Cloud token-file source is unsupported.
 
 Without Cloud credentials, enablement is `unverified`. Failed listing yields `unavailable`; manual scope selection still works. These flags also work with `auth`, which can infer the project from client JSON; `--project-id` overrides it. Grantloom never enables APIs or adds Cloud scopes to your consent request.
 

@@ -36,7 +36,7 @@ Grantloom 帮你办理这套授权手续：**带上自己的 Google OAuth 客户
 | 获得新的 access token | 刷新已有 profile，验证结果，并更新原存储位置 |
 | 让自己的脚本使用凭据 | 用 `exec` 把凭据注入子进程环境 |
 | 让 AI 助手协调授权流程 | 提供 CLI、七个 MCP 工具和 Skill |
-| 查询可以申请哪些权限 | 列出常用别名，可选查 API Discovery 和已启用 API |
+| 查询可以申请哪些权限 | 列出常用 scope 候选，可选查 API Discovery 和已启用 API |
 
 它管理的是**授权与凭据**，不会自己读取邮件、发送邮件、编辑表格或整理网盘。这些工作由使用凭据的程序完成。Grantloom 是酒店发钥匙的前台，不是包办保洁、早餐和接机的全体员工。
 
@@ -303,6 +303,15 @@ grantloom scopes --project-id YOUR_PROJECT_ID \
 **API 已启用 ≠ 账号已同意授权。** 这是两件事。门禁通电了，不代表你的门卡已经办好了。
 
 查询已启用 API 需要项目 ID，以及具有 Service Usage 读取权限的**另一份 Cloud 只读查询凭据**。token 文件只放 Cloud access token，环境变量参数传变量名。Cloud 来源一次选一个。`op://VAULT/ITEM/FIELD` 各部分内部的空格或斜杠需要 percent-encode。
+
+**Cloud token 文件也需要私有权限。** macOS/Linux 请把文件放在当前用户拥有、权限为 `0700` 的目录中，文件权限设为 `0600`。不安全的权限、symlink 或其他用户可写的父目录，可能让查询尚未请求 Google 就返回 `unavailable`。先在示例路径私下准备好 token 文件，再设置：
+
+```sh
+chmod 700 "$HOME/.config/google"
+chmod 600 "$HOME/.config/google/cloud-read-token"
+```
+
+Windows 请用 `--cloud-token-env` 或 `--cloud-token-op` 作为 Cloud 输入来源，不支持从 Cloud token 文件读取。
 
 没有 Cloud 凭据时状态为 `unverified`；查询失败为 `unavailable`，手动选择 scope 仍可继续。这些参数也适用于 `auth`，项目可从客户端 JSON 获取，`--project-id` 可覆盖。Grantloom 不会自行启用 API，也不会把 Cloud scope 塞进用户授权请求。
 

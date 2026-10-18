@@ -14,7 +14,7 @@
 - [x] Runtime acceptance: user Google account consent with a private profile outside public repo.
 - [x] 2026-10-18: retain completed release/acceptance records, remove unrelated runtime log and ignore root logs directory.
 - [x] 2026-10-18: rewrite the default English README and add Japanese/Simplified Chinese guides with matching examples, file/storage explanations and complete CLI/MCP references. Verified links, shell/JSON syntax, CLI flags, MCP tools/profile example, all three READMEs in the 17-file npm package, and 148 passing tests.
-- [ ] 2026-10-18: open the multilingual README PR, complete independent subagent review and fixes, verify CI, and merge to main.
+- [ ] 2026-10-18: [multilingual README PR #3](https://github.com/ryoshin0830/grantloom/pull/3) opened; independent subagent review found two documentation issues, both corrected in all three languages (Cloud token-file permissions/platform support and scope-listing wording). Awaiting re-review and final CI before merge.
 
 ## Release evidence
 
