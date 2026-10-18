@@ -13,6 +13,8 @@
 - [x] npm web login completed; npm whoami verified ryoshin0830.
 - [x] Runtime acceptance: user Google account consent with a private profile outside public repo.
 - [x] 2026-10-18: retain completed release/acceptance records, remove unrelated runtime log and ignore root logs directory.
+- [x] 2026-10-18: rewrite the default English README and add Japanese/Simplified Chinese guides with matching examples, file/storage explanations and complete CLI/MCP references. Verified links, shell/JSON syntax, CLI flags, MCP tools/profile example, all three READMEs in the 17-file npm package, and 148 passing tests.
+- [ ] 2026-10-18: open the multilingual README PR, complete independent subagent review and fixes, verify CI, and merge to main.
 
 ## Release evidence
 
